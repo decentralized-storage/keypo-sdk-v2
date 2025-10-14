@@ -3,6 +3,7 @@
  */
 
 import { createLitClient } from '@lit-protocol/lit-client';
+import { createAuthManager, storagePlugins } from "@lit-protocol/auth";
 import { nagaDev } from '@lit-protocol/networks';
 import { privateKeyToAccount } from 'viem/accounts';
 import { createWalletClient, http, type Account } from 'viem';
@@ -21,6 +22,24 @@ export interface EncryptionConfig {
   validationAddress: string;
   bundlerRpcUrl: string;
 }
+
+export const TIME = {
+  /** Milliseconds in one second */
+  SECOND_MS: 1000,
+  /** Milliseconds in one minute */
+  MINUTE_MS: 60 * 1000,
+  /** Milliseconds in one hour */
+  HOUR_MS: 60 * 60 * 1000,
+  /** Milliseconds in one day */
+  DAY_MS: 24 * 60 * 60 * 1000,
+  /** Timestamp conversion factor (seconds to milliseconds) */
+  TIMESTAMP_TO_MS: 1000,
+} as const;
+
+export const AUTH_EXPIRATION = {
+  /** Default auth expiration time (24 hours in milliseconds) */
+  DEFAULT_MS: TIME.DAY_MS,
+} as const;
 
 export class LitEncryption {
   private config: EncryptionConfig;
@@ -183,14 +202,49 @@ export class LitEncryption {
       const litClient = await this.initializeLitClient();
 
       // Perform decryption - simplified for now
-      const decryptedData = await litClient.decrypt({
+      /*const decryptedData = await litClient.decrypt({
         ciphertext: encryptedPayload.ciphertext,
         dataToEncryptHash: encryptedPayload.dataToEncryptHash,
         unifiedAccessControlConditions: encryptedPayload.accessControlConditions,
         chain: 'baseSepolia',
-      });
+      });*/
+      const accs = encryptedPayload.accessControlConditions;
+      const authManager = createAuthManager({
+        storage: storagePlugins.localStorageNode({
+        appName: 'synapse-cli',
+        networkName: 'naga-local',
+        storagePath: './lit-auth-local',
+        }),
+    });
 
-      return decryptedData.decryptedData as Uint8Array;
+    const authContext = await authManager.createEoaAuthContext({
+      config: {
+      account: this.getAccount() as any,
+      },
+      authConfig: {
+      domain: 'localhost',
+      statement: 'Decrypt test data',
+      expiration: new Date(Date.now() + AUTH_EXPIRATION.DEFAULT_MS).toISOString(),
+      resources: [
+          ['access-control-condition-decryption', '*'],
+          ['lit-action-execution', '*'],
+      ],
+      },
+      litClient,
+  });
+  const encryptedData = {
+    ciphertext: encryptedPayload.ciphertext,
+    dataToEncryptHash: encryptedPayload.dataToEncryptHash,
+};
+
+const decryptedResponse = await litClient.decrypt({
+  data: encryptedData,
+  unifiedAccessControlConditions: accs,
+  authContext: authContext,
+  chain: 'baseSepolia',
+});
+
+      return decryptedResponse.decryptedData as Uint8Array;
     } catch (error) {
       throw createEncryptionError('Decryption failed', {
         cause: error,

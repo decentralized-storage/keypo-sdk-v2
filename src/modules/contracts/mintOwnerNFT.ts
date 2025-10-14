@@ -21,9 +21,9 @@ export const mintOwnerNFT = async (
     }
 
     const txData = encodeFunctionData({
-      abi: abi,
-      functionName: "mintFileNFT",
-      args: [fileIdentifier, 1]
+      abi: abi as any,
+      functionName: "mintFromPermissionedFileForOwner",
+      args: [fileIdentifier, [kernelClient.account.address]]
     });
 
     if (debug) {

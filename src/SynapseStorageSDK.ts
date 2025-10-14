@@ -254,8 +254,10 @@ export class SynapseStorageSDK {
           // Parse as JSON to check if it's encrypted
           const jsonStr = new TextDecoder().decode(rawData);
           const parsed = JSON.parse(jsonStr);
-          
-          if (parsed.ciphertext && parsed.accessControlConditions) {
+
+          console.log("[DEBUG] parsed:", parsed);
+          if (parsed.ciphertext && parsed.dataToEncryptHash && parsed.accessControlConditions) {
+            console.log("[DEBUG] decrypting file...");
             if (!this.encryption || !this.privateKey) {
               throw createValidationError('Encryption not configured', {
                 userMessage: 'SDK was not initialized with encryption configuration for decryption'

@@ -37,7 +37,7 @@ export const deployPermissionedData = async (
     const txData = encodeFunctionData({
       abi: abi,
       functionName: "deployPermissionedFile",
-      args: [fileIdentifier, fileMetaData, parameters, signerAddress, validatorAddress],
+      args: [fileIdentifier, fileMetaData, validatorAddress, signerAddress, parameters],
     });
 
     if (debug) {
