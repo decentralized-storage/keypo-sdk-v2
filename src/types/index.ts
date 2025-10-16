@@ -261,6 +261,28 @@ export interface ShareOptions {
   debug?: boolean;
 }
 
+export interface DeleteOptions {
+  /** Enable debug output */
+  debug?: boolean;
+  
+  /** Progress callback */
+  onProgress?: (progress: { message: string; step?: number; total?: number }) => void;
+}
+
+export interface DeleteResult {
+  /** Transaction hash of the delete operation */
+  transactionHash: string;
+  
+  /** Data identifier that was deleted */
+  dataIdentifier: string;
+  
+  /** File information that was deleted */
+  fileName?: string;
+  
+  /** Block number where the transaction was confirmed */
+  blockNumber?: number;
+}
+
 // ============================================================================
 // Encryption Types
 // ============================================================================

@@ -16,6 +16,8 @@ import type {
   DownloadResult,
   BalanceInfo,
   ShareOptions,
+  DeleteOptions,
+  DeleteResult,
   DataMetadata,
   ExtendedMetadata,
   ListOptions,
@@ -488,13 +490,114 @@ export class SynapseStorageSDK {
   }
 
   /**
-   * Delete a file (revoke all permissions)
+   * Delete a file by piece CID (removes from permissions registry)
+   * Note: File data remains on Filecoin but access is revoked
    */
-  public async delete(pieceCid: string): Promise<void> {
-    // Note: Actual deletion from Filecoin is not possible
-    // This would revoke access permissions only
-    console.warn('Delete functionality would revoke permissions but file remains on Filecoin');
-    validatePieceCid(pieceCid);
+  public async delete(pieceCid: string, options?: DeleteOptions): Promise<DeleteResult> {
+    try {
+      validatePieceCid(pieceCid);
+      
+      if (!this.privateKey) {
+        throw createValidationError('Private key required', {
+          userMessage: 'Private key is required for delete operations'
+        });
+      }
+
+      options?.onProgress?.({ message: 'Looking up file by piece CID...', step: 1, total: 4 });
+
+      // Step 1: Find the file by piece CID using list function
+      const files = await this.list();
+      const fileData = files.find(file => file.pieceCid === pieceCid);
+      
+      if (!fileData) {
+        throw createValidationError('File not found', {
+          userMessage: `No file found with piece CID: ${pieceCid}`
+        });
+      }
+
+      if (!fileData.dataIdentifier) {
+        throw createValidationError('Invalid file data', {
+          userMessage: 'File data is missing required data identifier'
+        });
+      }
+
+      options?.onProgress?.({ message: 'Verifying ownership...', step: 2, total: 4 });
+
+      // Step 2: Verify ownership
+      const signer = this.synapse.getSigner();
+      const currentAddress = await signer.getAddress();
+      
+      if (fileData.owner?.toLowerCase() !== currentAddress.toLowerCase()) {
+        throw createValidationError('Permission denied', {
+          userMessage: `You are not the owner of this file. Owner: ${fileData.owner}, Your address: ${currentAddress}`
+        });
+      }
+
+      options?.onProgress?.({ message: 'Creating kernel client for deletion...', step: 3, total: 4 });
+
+      // Step 3: Create kernel client for smart contract operations
+      if (options?.debug) {
+        console.log(`[DEBUG] Creating kernel client for delete operation...`);
+        console.log(`[DEBUG] File to delete: ${fileData.fileName || 'Unknown'} (${fileData.dataIdentifier})`);
+      }
+
+      // Create wallet client and account with proper private key formatting
+      const formattedPrivateKey = this.privateKey!.startsWith('0x') 
+        ? this.privateKey 
+        : `0x${this.privateKey}`;
+      const account = privateKeyToAccount(formattedPrivateKey as `0x${string}`);
+      const walletClient = createWalletClient({
+        account,
+        chain: baseSepolia,
+        transport: http(this.config.rpcUrl),
+      });
+
+      // Get kernel authorization
+      const kernelVersion = KERNEL_V3_3;
+      const kernelAddresses = KernelVersionToAddressesMap[kernelVersion];
+      const authorization = await walletClient.signAuthorization({
+        contractAddress: kernelAddresses.accountImplementationAddress as `0x${string}`,
+        account,
+      });
+
+      // Create kernel client for smart contract operations
+      const kernelClient = await getKernelClient(
+        account,
+        baseSepolia,
+        this.config.encryption!.bundlerRpcUrl,
+        authorization,
+        options?.debug
+      );
+
+      options?.onProgress?.({ message: 'Deleting file from permissions registry...', step: 4, total: 4 });
+
+      // Step 4: Delete the file using the dataIdentifier and kernel client
+      if (options?.debug) {
+        console.log(`[DEBUG] Proceeding to delete file with dataIdentifier: ${fileData.dataIdentifier}`);
+      }
+
+      const transactionHash = await this.contracts!.deleteFile(
+        fileData.dataIdentifier,
+        kernelClient,
+        options?.debug
+      );
+
+      if (options?.debug) {
+        console.log(`[DEBUG] Successfully deleted file ${fileData.fileName} with transaction hash: ${transactionHash}`);
+      }
+
+      options?.onProgress?.({ message: 'File deleted successfully', step: 4, total: 4 });
+
+      return {
+        transactionHash,
+        dataIdentifier: fileData.dataIdentifier,
+        fileName: fileData.fileName,
+        blockNumber: undefined // We could get this from receipt if needed
+      };
+
+    } catch (error) {
+      throw ErrorHandler.normalize(error);
+    }
   }
 
   /**

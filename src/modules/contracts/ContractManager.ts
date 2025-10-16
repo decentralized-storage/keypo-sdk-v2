@@ -481,4 +481,160 @@ export class ContractManager {
       });
     }
   }
+
+  /**
+   * Delete a file from the permissions registry
+   */
+  public async deleteFile(
+    dataIdentifier: string,
+    kernelClient: any,  // ZeroDev kernel client for account abstraction
+    debug: boolean = false
+  ): Promise<string> {
+    try {
+      if (debug) {
+        console.log(`[DEBUG] DeleteFile - Registry Contract: ${this.config.registryAddress}`);
+        console.log(`[DEBUG] DeleteFile - Data Identifier: ${dataIdentifier}`);
+        console.log(`[DEBUG] DeleteFile - Kernel Client Address: ${kernelClient.account.address}`);
+      }
+
+      // Encode the function data using viem
+      const txData = encodeFunctionData({
+        abi: PermissionsRegistryAbi as any,
+        functionName: "deletePermissionedFile",
+        args: [dataIdentifier]
+      });
+
+      if (debug) {
+        console.log(`[DEBUG] DeleteFile - Encoded transaction data: ${txData}`);
+      }
+
+      // Retry logic similar to other contract operations
+      const retryAttempts = RETRY_CONFIG.DEFAULT_ATTEMPTS;
+      const retryDelay = RETRY_CONFIG.BASE_DELAY_MS;
+      let lastError: any;
+
+      for (let attempt = 1; attempt <= retryAttempts; attempt++) {
+        try {
+          if (debug && attempt > 1) {
+            console.log(`[DEBUG] DeleteFile - Retry attempt ${attempt}/${retryAttempts}`);
+          }
+
+          // Add exponential backoff delay between retry attempts
+          if (attempt > 1) {
+            const backoffDelay = calculateBackoffDelay(attempt - 1, retryDelay);
+            if (debug) {
+              console.log(`[DEBUG] DeleteFile - Waiting ${backoffDelay}ms before retry attempt ${attempt}`);
+            }
+            await new Promise(resolve => setTimeout(resolve, backoffDelay));
+          }
+
+          // Prepare the user operation
+          const userOperation = {
+            callData: await kernelClient.account.encodeCalls([{
+              to: this.config.registryAddress as `0x${string}`,
+              value: BigInt(0),
+              data: txData,
+            }]),
+            maxFeePerGas: undefined, // Let the bundler estimate
+            maxPriorityFeePerGas: undefined, // Let the bundler estimate
+          };
+
+          if (debug) {
+            console.log(`[DEBUG] DeleteFile - Sending user operation with callData: ${userOperation.callData}`);
+          }
+
+          // Send user operation with timeout
+          const userOpHash = await Promise.race([
+            kernelClient.sendUserOperation(userOperation),
+            new Promise<never>((_, reject) => 
+              setTimeout(() => reject(new Error('Timeout: DeleteFile sendUserOperation took too long')), 30000)
+            )
+          ]);
+
+          if (debug) {
+            console.log(`[DEBUG] DeleteFile - User operation hash: ${userOpHash}`);
+            console.log(`[DEBUG] DeleteFile - Waiting for confirmation...`);
+          }
+
+          // Wait for receipt with timeout
+          const { receipt } = await Promise.race([
+            kernelClient.waitForUserOperationReceipt({
+              hash: userOpHash,
+            }),
+            new Promise<never>((_, reject) => 
+              setTimeout(() => reject(new Error('Timeout: DeleteFile waitForUserOperationReceipt took too long')), 60000)
+            )
+          ]);
+
+          if (debug) {
+            console.log(`[DEBUG] DeleteFile - Transaction confirmed in block: ${receipt.blockNumber}`);
+            console.log(`[DEBUG] DeleteFile - Gas used: ${receipt.gasUsed?.toString()}`);
+            console.log(`[DEBUG] DeleteFile - Transaction hash: ${receipt.transactionHash}`);
+            console.log(`[DEBUG] DeleteFile - Successful on attempt ${attempt}`);
+          }
+
+          // Success - return transaction hash
+          return receipt.transactionHash;
+
+        } catch (error: any) {
+          lastError = error;
+          console.error(`[DEBUG] DeleteFile - Error on attempt ${attempt}/${retryAttempts}:`, error.message);
+          
+          // Check for specific error types
+          if (error.message && error.message.includes("UserOperation reverted during simulation")) {
+            console.error("[DEBUG] DeleteFile - UserOperation simulation failed - this could be due to:");
+            console.error("1. Insufficient permissions - user may not own this file");
+            console.error("2. File may not exist or already be deleted");
+            console.error("3. Network congestion or gas estimation issues");
+          }
+          
+          // If this is not the last attempt, continue to retry
+          if (attempt < retryAttempts) {
+            if (debug) {
+              console.log(`[DEBUG] DeleteFile - Will retry in ${retryDelay}ms...`);
+            }
+            continue;
+          }
+          
+          // If all attempts failed, break and throw error
+          break;
+        }
+      }
+
+      // If we get here, all attempts failed
+      throw lastError;
+
+    } catch (error: any) {
+      // Extract detailed error information
+      let errorDetails: any = {
+        contract: this.config.registryAddress,
+        dataIdentifier
+      };
+
+      // Add specific error details based on error type
+      if (error.code) {
+        errorDetails.errorCode = error.code;
+      }
+      if (error.reason) {
+        errorDetails.reason = error.reason;
+      }
+      if (error.data) {
+        errorDetails.contractError = error.data;
+      }
+      if (error.transaction) {
+        errorDetails.transaction = error.transaction;
+      }
+
+      if (debug) {
+        console.error(`[DEBUG] DeleteFile - Error details:`, errorDetails);
+        console.error(`[DEBUG] DeleteFile - Full error:`, error);
+      }
+
+      throw createContractError('Failed to delete file', {
+        cause: error,
+        userMessage: `Could not delete file with data identifier ${dataIdentifier}. ${error.reason || error.message || 'Unknown contract error'}`,
+        details: errorDetails
+      });
+    }
+  }
 }

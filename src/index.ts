@@ -29,6 +29,8 @@ export type {
   FileListEntry,
   BalanceInfo,
   ShareOptions,
+  DeleteOptions,
+  DeleteResult,
   
   // Encryption types
   EncryptedPayload,
