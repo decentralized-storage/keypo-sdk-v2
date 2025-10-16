@@ -101,8 +101,7 @@ export {
 export {
   validateSDKConfig,
   validatePieceCid,
-  validateAddress,
-  validateDataIdentifier
+  validateAddress
 } from './utils/validation.js';
 
 // Module classes (for advanced usage)

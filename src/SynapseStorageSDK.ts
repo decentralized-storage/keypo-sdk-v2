@@ -28,7 +28,7 @@ import type {
 import { LitEncryption } from './modules/encryption/LitEncryption.js';
 import { ContractManager } from './modules/contracts/ContractManager.js';
 import { StorageManager } from './modules/storage/StorageManager.js';
-import { validateSDKConfig, validatePieceCid, validateAddress, validateDataIdentifier } from './utils/validation.js';
+import { validateSDKConfig, validatePieceCid, validateAddress } from './utils/validation.js';
 import { createValidationError, ErrorHandler } from './errors/index.js';
 import { getKernelClient } from './utils/getKernelClient.js';
 
@@ -425,69 +425,6 @@ export class SynapseStorageSDK {
     }
   }
 
-  /**
-   * Make a file public (anyone can decrypt)
-   */
-  public async makePublic(dataIdentifier: string): Promise<void> {
-    try {
-      validateDataIdentifier(dataIdentifier);
-      
-      if (!this.contracts) {
-        throw createValidationError('Contracts not configured', {
-          userMessage: 'SDK was not initialized with smart contract configuration'
-        });
-      }
-
-      // Get file contract address
-      const provider = this.synapse.getProvider();
-      const fileContractAddress = await this.contracts.getFileContractAddress(
-        dataIdentifier,
-        provider
-      );
-
-      if (!fileContractAddress) {
-        throw createValidationError('File contract not found', {
-          userMessage: 'Could not find smart contract for this file'
-        });
-      }
-
-      await this.contracts.makePublic(fileContractAddress, this.synapse.getSigner());
-    } catch (error) {
-      throw ErrorHandler.normalize(error);
-    }
-  }
-
-  /**
-   * Make a file private (NFT required for access)
-   */
-  public async makePrivate(dataIdentifier: string): Promise<void> {
-    try {
-      validateDataIdentifier(dataIdentifier);
-      
-      if (!this.contracts) {
-        throw createValidationError('Contracts not configured', {
-          userMessage: 'SDK was not initialized with smart contract configuration'
-        });
-      }
-
-      // Get file contract address
-      const provider = this.synapse.getProvider();
-      const fileContractAddress = await this.contracts.getFileContractAddress(
-        dataIdentifier,
-        provider
-      );
-
-      if (!fileContractAddress) {
-        throw createValidationError('File contract not found', {
-          userMessage: 'Could not find smart contract for this file'
-        });
-      }
-
-      await this.contracts.makePrivate(fileContractAddress, this.synapse.getSigner());
-    } catch (error) {
-      throw ErrorHandler.normalize(error);
-    }
-  }
 
   /**
    * Delete a file by piece CID (removes from permissions registry)

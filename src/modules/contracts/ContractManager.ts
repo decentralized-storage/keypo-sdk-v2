@@ -4,7 +4,7 @@
 
 import { ethers, Contract, ZeroAddress } from 'ethers';
 import { encodeFunctionData } from 'viem';
-import { PermissionsRegistryAbi, PermissionedFileAbi } from './abis.js';
+import { PermissionsRegistryAbi } from './abis.js';
 import { createContractError } from '../../errors/index.js';
 import type { ExtendedMetadata } from '../../types/index.js';
 import { deployPermissionedData, type PermissionParameters } from './deployPermissionedData.js';
@@ -380,107 +380,6 @@ export class ContractManager {
     }
   }
 
-  /**
-   * Make a file public (anyone can access)
-   */
-  public async makePublic(
-    fileContractAddress: string,
-    kernelClient: any  // ZeroDev kernel client for account abstraction
-  ): Promise<void> {
-    try {
-      // Encode the function data using viem
-      const txData = encodeFunctionData({
-        abi: PermissionedFileAbi as any,
-        functionName: "makePublic",
-        args: []
-      });
-
-      // Prepare the user operation
-      const userOperation = {
-        callData: await kernelClient.account.encodeCalls([{
-          to: fileContractAddress as `0x${string}`,
-          value: BigInt(0),
-          data: txData,
-        }]),
-        maxFeePerGas: undefined, // Let the bundler estimate
-        maxPriorityFeePerGas: undefined, // Let the bundler estimate
-      };
-
-      // Send user operation with timeout
-      const userOpHash = await Promise.race([
-        kernelClient.sendUserOperation(userOperation),
-        new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout: MakePublic sendUserOperation took too long')), 30000)
-        )
-      ]);
-
-      // Wait for receipt with timeout
-      await Promise.race([
-        kernelClient.waitForUserOperationReceipt({
-          hash: userOpHash,
-        }),
-        new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout: MakePublic waitForUserOperationReceipt took too long')), 60000)
-        )
-      ]);
-    } catch (error) {
-      throw createContractError('Failed to make file public', {
-        cause: error,
-        userMessage: 'Could not change file to public access'
-      });
-    }
-  }
-
-  /**
-   * Make a file private (NFT required for access)
-   */
-  public async makePrivate(
-    fileContractAddress: string,
-    kernelClient: any  // ZeroDev kernel client for account abstraction
-  ): Promise<void> {
-    try {
-      // Encode the function data using viem
-      const txData = encodeFunctionData({
-        abi: PermissionedFileAbi as any,
-        functionName: "makePrivate",
-        args: []
-      });
-
-      // Prepare the user operation
-      const userOperation = {
-        callData: await kernelClient.account.encodeCalls([{
-          to: fileContractAddress as `0x${string}`,
-          value: BigInt(0),
-          data: txData,
-        }]),
-        maxFeePerGas: undefined, // Let the bundler estimate
-        maxPriorityFeePerGas: undefined, // Let the bundler estimate
-      };
-
-      // Send user operation with timeout
-      const userOpHash = await Promise.race([
-        kernelClient.sendUserOperation(userOperation),
-        new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout: MakePrivate sendUserOperation took too long')), 30000)
-        )
-      ]);
-
-      // Wait for receipt with timeout
-      await Promise.race([
-        kernelClient.waitForUserOperationReceipt({
-          hash: userOpHash,
-        }),
-        new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error('Timeout: MakePrivate waitForUserOperationReceipt took too long')), 60000)
-        )
-      ]);
-    } catch (error) {
-      throw createContractError('Failed to make file private', {
-        cause: error,
-        userMessage: 'Could not change file to private access'
-      });
-    }
-  }
 
   /**
    * Delete a file from the permissions registry

@@ -261,24 +261,6 @@ const result = await sdk.delete('bafk...', {
 console.log(`File deleted: ${result.transactionHash}`);
 ```
 
-### Access Control
-
-```typescript
-async makePublic(dataIdentifier: string): Promise<void>
-async makePrivate(dataIdentifier: string): Promise<void>
-```
-
-Change file access permissions between public and private modes.
-
-**Example:**
-```typescript
-// Make a private file public (anyone can decrypt)
-await sdk.makePublic('data-identifier-123');
-
-// Make a public file private (requires NFT to decrypt)
-await sdk.makePrivate('data-identifier-123');
-```
-
 ### Balance Management
 
 ```typescript
