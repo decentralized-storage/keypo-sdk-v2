@@ -24,8 +24,8 @@ export type {
   DownloadOptions,
   DownloadResult,
   DownloadProgress,
-  ListFilter,
-  FileEntry,
+  ListOptions,
+  FileListEntry,
   BalanceInfo,
   ShareOptions,
   

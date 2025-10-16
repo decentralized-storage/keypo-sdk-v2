@@ -158,7 +158,7 @@ export class StorageManager {
    */
   public async upload(
     data: Uint8Array,
-    callbacks?: StorageCallbacks,
+    _callbacks?: StorageCallbacks,
     onProgress?: (status: UploadProgress) => void
   ): Promise<{ pieceCid: any; datasetCreated: boolean }> {
     try {
@@ -171,53 +171,8 @@ export class StorageManager {
 
       let datasetCreated = false;
       
-      // Create storage service with callbacks
-      const storageService = await this.synapse.createStorage({
-        callbacks: {
-          onDataSetResolved: () => {
-            callbacks?.onDataSetResolved?.();
-            onProgress?.({
-              stage: 'uploading',
-              message: 'Dataset resolved',
-              percentage: 10
-            });
-          },
-          onDataSetCreationStarted: () => {
-            datasetCreated = true;
-            callbacks?.onDataSetCreationStarted?.();
-            onProgress?.({
-              stage: 'uploading',
-              message: 'Creating dataset...',
-              percentage: 20
-            });
-          },
-          onDataSetCreationProgress: (status) => {
-            callbacks?.onDataSetCreationProgress?.(status);
-            if (status.transactionSuccess) {
-              onProgress?.({
-                stage: 'uploading',
-                message: 'Dataset transaction confirmed',
-                percentage: 30
-              });
-            }
-            if (status.serverConfirmed) {
-              onProgress?.({
-                stage: 'uploading',
-                message: 'Dataset ready',
-                percentage: 40
-              });
-            }
-          },
-          onProviderSelected: (provider) => {
-            callbacks?.onProviderSelected?.(provider);
-            onProgress?.({
-              stage: 'uploading',
-              message: `Provider selected: ${provider.name}`,
-              percentage: 50
-            });
-          },
-        },
-      });
+      // Create storage service (no parameters, just like synapse-cli)
+      const storageService = await this.synapse.createStorage();
 
       // Upload the data
       onProgress?.({
@@ -226,32 +181,7 @@ export class StorageManager {
         percentage: 60
       });
 
-      const { pieceCid } = await storageService.upload(data, {
-        onUploadComplete: (piece) => {
-          callbacks?.onUploadComplete?.(piece);
-          onProgress?.({
-            stage: 'uploading',
-            message: 'Upload complete, adding to dataset...',
-            percentage: 80
-          });
-        },
-        onPieceAdded: (transactionResponse) => {
-          callbacks?.onPieceAdded?.(transactionResponse);
-          onProgress?.({
-            stage: 'uploading',
-            message: 'Confirming transaction...',
-            percentage: 90
-          });
-        },
-        onPieceConfirmed: () => {
-          callbacks?.onPieceConfirmed?.();
-          onProgress?.({
-            stage: 'finalizing',
-            message: 'File added to dataset',
-            percentage: 100
-          });
-        },
-      });
+      const { pieceCid } = await storageService.upload(data);
 
       return { pieceCid, datasetCreated };
     } catch (error) {

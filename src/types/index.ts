@@ -143,50 +143,73 @@ export interface DownloadResult {
   outputPath?: string;
 }
 
-export interface ListFilter {
-  /** Filter by owner address */
-  owner?: string;
+export interface ListOptions {
+  /** Show detailed file information */
+  detailed?: boolean;
   
-  /** Filter by access type */
-  accessType?: 'public' | 'private' | 'all';
-  
-  /** Filter by date range */
-  dateRange?: {
-    start?: Date;
-    end?: Date;
+  /** Filter options */
+  filter?: {
+    /** Filter by field */
+    filterBy?: {
+      field: string;
+      value: string | number | boolean;
+      operator?: 'equals' | 'contains' | 'startsWith' | 'endsWith';
+    };
+    /** Sort options */
+    sortBy?: {
+      field: string;
+      direction?: 'asc' | 'desc';
+    };
+    /** Pagination options */
+    pagination?: {
+      pageSize?: number;
+      maxPages?: number;
+    };
   };
   
-  /** Maximum number of results */
-  limit?: number;
+  /** API URL override for testing */
+  apiUrl?: string;
   
-  /** Offset for pagination */
-  offset?: number;
+  /** Enable debug output */
+  debug?: boolean;
 }
 
-export interface FileEntry {
-  /** Piece CID */
-  pieceCid: string;
-  
-  /** Data identifier (for encrypted files) */
-  dataIdentifier?: string;
-  
+export interface FileListEntry {
   /** File name */
   fileName: string;
   
+  /** Piece CID */
+  pieceCid: string;
+  
+  /** Data identifier */
+  dataIdentifier: string;
+  
   /** File size in bytes */
-  fileSize: number;
+  fileSize?: number;
   
-  /** Owner address */
-  owner: string;
-  
-  /** Upload timestamp */
-  uploadedAt: Date;
+  /** Whether the file is public */
+  isPublic: boolean;
   
   /** Whether the file is encrypted */
   encrypted: boolean;
   
-  /** Access type for encrypted files */
-  accessType?: 'public' | 'private';
+  /** Upload timestamp */
+  uploadedAt?: string;
+  
+  /** Contract address for the file */
+  contractAddress?: string;
+  
+  /** File owner address */
+  owner: string;
+  
+  /** Whether access NFT has been minted */
+  isAccessMinted?: boolean;
+  
+  /** Shared with users */
+  shares?: string[];
+  
+  /** File status */
+  status?: string;
   
   /** Additional metadata */
   metadata?: Record<string, any>;
