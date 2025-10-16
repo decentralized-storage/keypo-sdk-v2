@@ -256,6 +256,9 @@ export interface ShareOptions {
   
   /** Permission level */
   permission?: 'read' | 'write';
+  
+  /** Enable debug output */
+  debug?: boolean;
 }
 
 // ============================================================================

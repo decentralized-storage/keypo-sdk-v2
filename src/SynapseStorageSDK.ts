@@ -301,11 +301,11 @@ export class SynapseStorageSDK {
   }
 
   /**
-   * Share a file with another user
+   * Share a file with another user using piece CID
    */
-  public async share(dataIdentifier: string, options: ShareOptions): Promise<void> {
+  public async share(pieceCid: string, options: ShareOptions): Promise<void> {
     try {
-      validateDataIdentifier(dataIdentifier);
+      validatePieceCid(pieceCid);
       validateAddress(options.recipient);
       
       if (!this.contracts) {
@@ -314,12 +314,110 @@ export class SynapseStorageSDK {
         });
       }
 
+      if (options.debug) {
+        console.log(`[DEBUG] Sharing file with piece CID: ${pieceCid} to ${options.recipient}`);
+      }
+
+      // Step 1: Find the file by piece CID using list function
+      const allFiles = await this.list({
+        debug: options.debug
+      });
+
+      // Manually filter by piece CID since the filtering might not work correctly
+      const matchingFiles = allFiles.filter(file => 
+        file.pieceCid === pieceCid
+      );
+
+      // Check if file exists
+      if (matchingFiles.length === 0) {
+        throw createValidationError('File not found', {
+          userMessage: `No encrypted file found with piece CID: ${pieceCid}`
+        });
+      }
+
+      if (matchingFiles.length > 1) {
+        if (options.debug) {
+          console.warn('Multiple files found with the same piece CID. Using the first one.');
+        }
+      }
+
+      const fileData = matchingFiles[0];
+      
+      if (options.debug) {
+        console.log(`[DEBUG] File found:`, {
+          name: fileData.fileName,
+          dataIdentifier: fileData.dataIdentifier,
+          accessType: fileData.isPublic ? 'public' : 'private',
+          owner: fileData.owner
+        });
+      }
+
+      // Step 2: Check if file is public
+      if (fileData.isPublic) {
+        throw createValidationError('File is public', {
+          userMessage: 'File is public - no need to share. Anyone can already decrypt this file.'
+        });
+      }
+
+      // Step 3: Get current wallet address and verify ownership
+      const signer = this.synapse.getSigner();
+      const currentAddress = await signer.getAddress();
+      
+      if (fileData.owner?.toLowerCase() !== currentAddress.toLowerCase()) {
+        throw createValidationError('Permission denied', {
+          userMessage: `You are not the owner of this file. Owner: ${fileData.owner}, Your address: ${currentAddress}`
+        });
+      }
+
+      // Step 4: Create kernel client for smart contract operations
+      if (options.debug) {
+        console.log(`[DEBUG] Creating kernel client for sharing operation...`);
+      }
+
+      // Create wallet client and account with proper private key formatting
+      const formattedPrivateKey = this.privateKey!.startsWith('0x') 
+        ? this.privateKey 
+        : `0x${this.privateKey}`;
+      const account = privateKeyToAccount(formattedPrivateKey as `0x${string}`);
+      const walletClient = createWalletClient({
+        account,
+        chain: baseSepolia,
+        transport: http(this.config.rpcUrl),
+      });
+
+      // Get kernel authorization
+      const kernelVersion = KERNEL_V3_3;
+      const kernelAddresses = KernelVersionToAddressesMap[kernelVersion];
+      const authorization = await walletClient.signAuthorization({
+        contractAddress: kernelAddresses.accountImplementationAddress as `0x${string}`,
+        account,
+      });
+
+      // Create kernel client for smart contract operations
+      const kernelClient = await getKernelClient(
+        account,
+        baseSepolia,
+        this.config.encryption!.bundlerRpcUrl,
+        authorization,
+        options.debug
+      );
+
+      // Step 5: Share the file using the dataIdentifier and kernel client
+      if (options.debug) {
+        console.log(`[DEBUG] Proceeding to mint access NFT for dataIdentifier: ${fileData.dataIdentifier}`);
+      }
+
       await this.contracts.shareFile(
-        dataIdentifier,
+        fileData.dataIdentifier,
         options.recipient,
         1,
-        this.synapse.getSigner()
+        kernelClient,
+        options.debug
       );
+
+      if (options.debug) {
+        console.log(`[DEBUG] Successfully shared file ${fileData.fileName} with ${options.recipient}`);
+      }
     } catch (error) {
       throw ErrorHandler.normalize(error);
     }
