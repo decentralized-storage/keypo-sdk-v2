@@ -174,6 +174,20 @@ export interface ListOptions {
   debug?: boolean;
 }
 
+export interface ListPublicOptions {
+  /** Show detailed file information */
+  detailed?: boolean;
+  
+  /** API URL override for testing */
+  apiUrl?: string;
+  
+  /** Maximum number of files to fetch (default: 1000) */
+  limit?: number;
+  
+  /** Enable debug output */
+  debug?: boolean;
+}
+
 export interface FileListEntry {
   /** File name */
   fileName: string;

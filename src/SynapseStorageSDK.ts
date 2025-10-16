@@ -19,6 +19,7 @@ import type {
   DataMetadata,
   ExtendedMetadata,
   ListOptions,
+  ListPublicOptions,
   FileListEntry
 } from './types/index.js';
 
@@ -846,6 +847,189 @@ export class SynapseStorageSDK {
       
       if (options?.debug) {
         console.log("[DEBUG] Final file array:", fileArray);
+      }
+      
+      return fileArray;
+      
+    } catch (error) {
+      throw ErrorHandler.normalize(error);
+    }
+  }
+
+  /**
+   * List all public encrypted files from all users
+   */
+  public async listPublic(options?: ListPublicOptions): Promise<FileListEntry[]> {
+    try {
+      // Use default API URL or override if provided
+      const apiUrl = options?.apiUrl || 'https://api.keypo.io';
+      const limit = options?.limit || 1000;
+      
+      if (options?.debug) {
+        console.log("[DEBUG] ListPublic settings:", { apiUrl, limit });
+      }
+      
+      // Fetch all files from all users (no address filter)
+      const allFiles: Record<string, any> = {};
+      const deletedFileIds = new Set<string>();
+      let skip = 0;
+      const batchSize = 100;
+      let hasMore = true;
+      
+      while (hasMore && skip < limit) {
+        try {
+          const currentBatch = Math.min(batchSize, limit - skip);
+          const url = `${apiUrl}/graph/filesByOwner?skip=${skip}&first=${currentBatch}`;
+          
+          if (options?.debug) {
+            console.log(`[DEBUG] Fetching public files batch at skip=${skip}:`, url);
+          }
+          
+          const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          });
+          
+          if (!response.ok) {
+            throw new Error(`API request failed: ${response.statusText}`);
+          }
+          
+          const data = await response.json() as {
+            permissionedFileDeployeds?: Array<{
+              fileIdentifier: string;
+              fileMetadata: string;
+              fileContractAddress: string;
+              fileOwner: string;
+            }>;
+            permissionedFileDeleteds?: Array<{
+              fileIdentifier: string;
+            }>;
+          };
+          
+          const { permissionedFileDeployeds = [], permissionedFileDeleteds = [] } = data;
+          
+          // Check if we got any results
+          if (permissionedFileDeployeds.length === 0) {
+            hasMore = false;
+            break;
+          }
+          
+          // Collect deleted file IDs
+          for (const deleted of permissionedFileDeleteds) {
+            deletedFileIds.add(deleted.fileIdentifier);
+          }
+          
+          // Process deployed files
+          for (const file of permissionedFileDeployeds) {
+            // Skip if this file has been deleted
+            if (deletedFileIds.has(file.fileIdentifier)) {
+              continue;
+            }
+            
+            try {
+              const metadata = JSON.parse(file.fileMetadata || '{}');
+              
+              // Extract piece CID from nested structure
+              const pieceCid = metadata.filecoinStorageInfo?.pieceCid || 
+                             metadata.filecoinStorageInfo?.pieceCID ||
+                             metadata.pieceCid || 
+                             metadata.cid;
+              
+              // Only include files with Filecoin storage info (like the CLI does)
+              if (metadata.filecoinStorageInfo?.pieceCid || metadata.filecoinStorageInfo?.pieceCID) {
+                // Create file entry
+                allFiles[file.fileIdentifier] = {
+                  dataMetadata: metadata,
+                  dataContractAddress: file.fileContractAddress,
+                  owner: file.fileOwner,
+                  isAccessMinted: false, // We don't have this info from this endpoint
+                  cid: pieceCid
+                };
+              }
+            } catch (e) {
+              // Skip files with invalid metadata
+              if (options?.debug) {
+                console.warn(`Skipping file with invalid metadata: ${file.fileIdentifier}`);
+              }
+            }
+          }
+          
+          skip += currentBatch;
+          
+          if (options?.debug) {
+            console.log(`[DEBUG] Processed public files batch. Total so far: ${Object.keys(allFiles).length}`);
+          }
+        } catch (error) {
+          if (options?.debug) {
+            console.error(`Error fetching batch at skip=${skip}:`, error);
+          }
+          break;
+        }
+      }
+      
+      // Final cleanup: remove any files that were marked as deleted
+      for (const deletedId of deletedFileIds) {
+        delete allFiles[deletedId];
+      }
+      
+      if (options?.debug) {
+        console.log(`[DEBUG] Total files after cleanup: ${Object.keys(allFiles).length}`);
+      }
+      
+      // Filter for public files only
+      const publicFiles = Object.entries(allFiles).filter(([, file]) => {
+        return file.dataMetadata?.accessType === 'public';
+      });
+      
+      if (options?.debug) {
+        console.log(`[DEBUG] Public files found: ${publicFiles.length}`);
+      }
+      
+      // Convert to FileListEntry format
+      const fileArray: FileListEntry[] = publicFiles.map(([dataIdentifier, file]) => {
+        // Parse the full metadata if available
+        const metadata = file.dataMetadata || {};
+        
+        // Extract file size from metadata
+        let fileSize: number | undefined;
+        if (metadata.size) {
+          fileSize = metadata.size;
+        } else if (metadata.fileSize) {
+          fileSize = metadata.fileSize;
+        }
+        
+        // Extract upload timestamp
+        let uploadedAt: string | undefined;
+        if (metadata.filecoinStorageInfo?.uploadTimestamp) {
+          uploadedAt = metadata.filecoinStorageInfo.uploadTimestamp;
+        } else if (metadata.uploadTimestamp) {
+          uploadedAt = metadata.uploadTimestamp;
+        }
+        
+        return {
+          fileName: metadata.name || 'Unknown',
+          pieceCid: metadata.filecoinStorageInfo?.pieceCid || 
+                   metadata.filecoinStorageInfo?.pieceCID ||
+                   metadata.pieceCid || 
+                   file.cid || '',
+          dataIdentifier: dataIdentifier,
+          fileSize: fileSize,
+          isPublic: true, // All files in this result are public
+          encrypted: true, // All files in this SDK are encrypted
+          uploadedAt: uploadedAt,
+          contractAddress: file.dataContractAddress,
+          owner: file.owner,
+          isAccessMinted: file.isAccessMinted,
+          shares: [], // Would need additional API calls to get share info
+          status: 'active', // Default status
+          metadata: metadata
+        };
+      });
+      
+      if (options?.debug) {
+        console.log("[DEBUG] Final public file array:", fileArray);
       }
       
       return fileArray;
