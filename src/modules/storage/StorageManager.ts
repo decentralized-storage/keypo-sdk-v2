@@ -9,7 +9,8 @@ import type {
   StorageCallbacks, 
   UploadProgress,
   DownloadProgress,
-  BalanceInfo
+  BalanceInfo,
+  ProofsetInfo
 } from '../../types/index.js';
 import { 
   TOKEN_AMOUNTS, 
@@ -23,6 +24,7 @@ export interface StorageConfig {
   capacityGB: number;
   persistenceDays: number;
   withCDN: boolean;
+  minDaysThreshold: number;
 }
 
 export class StorageManager {
@@ -34,7 +36,8 @@ export class StorageManager {
     this.config = {
       capacityGB: config.capacityGB || STORAGE_DEFAULTS.CAPACITY_GB,
       persistenceDays: config.persistenceDays || STORAGE_DEFAULTS.PERSISTENCE_DAYS,
-      withCDN: config.withCDN ?? STORAGE_DEFAULTS.WITH_CDN
+      withCDN: config.withCDN ?? STORAGE_DEFAULTS.WITH_CDN,
+      minDaysThreshold: config.minDaysThreshold || STORAGE_DEFAULTS.MIN_DAYS_THRESHOLD
     };
   }
 
@@ -154,12 +157,107 @@ export class StorageManager {
   }
 
   /**
+   * Find optimal proofset for upload based on withCDN configuration
+   */
+  private async getOptimalProofset(address: string): Promise<ProofsetInfo | null> {
+    try {
+      // Get all client proofsets - using internal Synapse SDK methods
+      const datasets = await this.synapse.storage.findDataSets(address);
+      
+      if (!datasets || datasets.length === 0) {
+        return null; // No existing proofsets, will create new one
+      }
+
+      // Try to access the internal pandora service for more detailed proofset info
+      // This mimics the example app's getProofset logic
+      let detailedProofsets: any[] = [];
+      
+      try {
+        // Access the internal pandora service if available
+        const pandoraService = (this.synapse as any).pandoraService;
+        if (pandoraService && pandoraService.getClientProofSetsWithDetails) {
+          detailedProofsets = await pandoraService.getClientProofSetsWithDetails(address);
+        }
+      } catch (error) {
+        console.warn('Could not access detailed proofset info, using basic dataset info');
+      }
+
+      // Filter by withCDN preference (if detailed info available)
+      let filteredProofsets = detailedProofsets.length > 0 
+        ? detailedProofsets.filter(p => p.withCDN === this.config.withCDN)
+        : datasets;
+
+      // Fall back to all proofsets if none match CDN preference
+      if (filteredProofsets.length === 0) {
+        filteredProofsets = detailedProofsets.length > 0 ? detailedProofsets : datasets;
+      }
+
+      // Find proofset with highest currentRootCount for optimal performance
+      // Avoid providers with 0 roots as they might be problematic
+      let optimalProofset = null;
+      let maxRootCount = -1;
+
+      for (const proofset of filteredProofsets) {
+        const rootCount = proofset.currentRootCount || proofset.rootCount || 0;
+        
+        // Prefer proofsets with more roots (better established providers)
+        if (rootCount > maxRootCount) {
+          maxRootCount = rootCount;
+          optimalProofset = proofset;
+        }
+      }
+
+      // If no proofsets with roots found, use the first available
+      if (!optimalProofset && filteredProofsets.length > 0) {
+        optimalProofset = filteredProofsets[0];
+        maxRootCount = 0;
+      }
+
+      if (!optimalProofset) {
+        return null;
+      }
+
+      // Get provider info
+      let providerId = optimalProofset.providerId || optimalProofset.id || 'unknown';
+      
+      try {
+        // Try to get provider details if pandora service is available
+        const pandoraService = (this.synapse as any).pandoraService;
+        if (pandoraService && pandoraService.getProvider) {
+          const providerInfo = await pandoraService.getProvider(providerId);
+          if (providerInfo) {
+            providerId = providerInfo.id || providerId;
+          }
+        }
+      } catch (error) {
+        console.warn('Could not get provider details');
+      }
+
+      return {
+        providerId,
+        proofset: optimalProofset,
+        withCDN: optimalProofset.withCDN || this.config.withCDN,
+        currentRootCount: maxRootCount
+      };
+
+    } catch (error) {
+      console.warn('Error finding optimal proofset:', error);
+      return null;
+    }
+  }
+
+  /**
    * Upload data to Filecoin
    */
   public async upload(
     data: Uint8Array,
-    _callbacks?: StorageCallbacks,
-    onProgress?: (status: UploadProgress) => void
+    callbacks?: StorageCallbacks,
+    onProgress?: (status: UploadProgress) => void,
+    serviceProvider?: {
+      providerId?: number;
+      providerAddress?: string;
+      forceCreateDataSet?: boolean;
+    }
   ): Promise<{ pieceCid: any; datasetCreated: boolean }> {
     try {
       // Report upload start
@@ -170,24 +268,231 @@ export class StorageManager {
       });
 
       let datasetCreated = false;
-      
-      // Create storage service (no parameters, just like synapse-cli)
-      const storageService = await this.synapse.createStorage();
+      const address = await this.synapse.getSigner().getAddress();
 
-      // Upload the data
+      // Step 1: Find optimal proofset
       onProgress?.({
         stage: 'uploading',
-        message: 'Uploading to storage provider...',
+        message: 'Finding optimal storage proofset...',
+        percentage: 5
+      });
+
+      const proofsetInfo = await this.getOptimalProofset(address);
+      
+      if (proofsetInfo) {
+        // Existing proofset found
+        callbacks?.onDataSetResolved?.({
+          datasetId: proofsetInfo.proofset.id || 0,
+          provider: proofsetInfo.providerId,
+          withCDN: proofsetInfo.withCDN
+        });
+
+        callbacks?.onProviderSelected?.({
+          name: proofsetInfo.providerId,
+          id: proofsetInfo.providerId,
+          withCDN: proofsetInfo.withCDN,
+          currentRootCount: proofsetInfo.currentRootCount
+        });
+
+        onProgress?.({
+          stage: 'uploading',
+          message: `Existing proofset found (${proofsetInfo.currentRootCount} roots)`,
+          percentage: 25
+        });
+      } else {
+        // Will create new proofset
+        onProgress?.({
+          stage: 'uploading',
+          message: 'No existing proofset found, will create new dataset...',
+          percentage: 25
+        });
+        datasetCreated = true;
+      }
+
+      // Step 2: Create storage service with comprehensive callbacks
+      const createStorageCallbacks = {
+        // Dataset resolution callback
+        onDataSetResolved: (info: any) => {
+          callbacks?.onDataSetResolved?.(info);
+          onProgress?.({
+            stage: 'uploading',
+            message: 'Existing dataset resolved and ready',
+            percentage: 30
+          });
+        },
+
+        // Dataset creation started callback
+        onDataSetCreationStarted: (transactionResponse: any, statusUrl?: string) => {
+          callbacks?.onDataSetCreationStarted?.(transactionResponse, statusUrl);
+          onProgress?.({
+            stage: 'uploading',
+            message: 'Creating new dataset on blockchain...',
+            percentage: 35
+          });
+          datasetCreated = true;
+        },
+
+        // Dataset creation progress callback
+        onDataSetCreationProgress: (status: any) => {
+          const progressStatus = {
+            ...status,
+            message: status.transactionSuccess 
+              ? 'Dataset transaction confirmed on chain' 
+              : status.serverConfirmed 
+                ? `Dataset ready! (${Math.round((status.elapsedMs || 0) / 1000)}s)`
+                : 'Creating dataset...'
+          };
+
+          callbacks?.onDataSetCreationProgress?.(progressStatus);
+          
+          if (status.transactionSuccess) {
+            onProgress?.({
+              stage: 'uploading',
+              message: 'Dataset transaction confirmed on chain',
+              percentage: 45
+            });
+          }
+          
+          if (status.serverConfirmed) {
+            onProgress?.({
+              stage: 'uploading',
+              message: `Dataset ready! (${Math.round((status.elapsedMs || 0) / 1000)}s)`,
+              percentage: 50
+            });
+          }
+        },
+
+        // Provider selection callback
+        onProviderSelected: (provider: any) => {
+          const providerInfo = {
+            name: provider.name || provider.id || 'Unknown Provider',
+            id: provider.id || provider.name || 'unknown',
+            withCDN: this.config.withCDN,
+            currentRootCount: 0
+          };
+          
+          callbacks?.onProviderSelected?.(providerInfo);
+          onProgress?.({
+            stage: 'uploading',
+            message: `Storage provider selected: ${providerInfo.name}`,
+            percentage: 55
+          });
+        }
+      };
+
+      // Create storage service with callbacks and optional provider selection
+      const storageServiceOptions: any = {
+        callbacks: createStorageCallbacks,
+        withCDN: this.config.withCDN
+      };
+      
+      // Add provider selection if specified
+      if (serviceProvider?.providerId) {
+        storageServiceOptions.providerId = serviceProvider.providerId;
+        onProgress?.({
+          stage: 'uploading',
+          message: `Using specified service provider: ${serviceProvider.providerId}`,
+          percentage: 28
+        });
+      }
+      
+      if (serviceProvider?.providerAddress) {
+        storageServiceOptions.providerAddress = serviceProvider.providerAddress;
+      }
+      
+      if (serviceProvider?.forceCreateDataSet) {
+        storageServiceOptions.forceCreateDataSet = serviceProvider.forceCreateDataSet;
+        datasetCreated = true;
+      }
+      
+      const storageService = await this.synapse.createStorage(storageServiceOptions);
+
+      // Step 3: Upload the data with upload-specific callbacks
+      onProgress?.({
+        stage: 'uploading',
+        message: 'Uploading file to storage provider...',
         percentage: 60
       });
 
-      const { pieceCid } = await storageService.upload(data);
+      const uploadCallbacks = {
+        // Upload completion callback
+        onUploadComplete: (piece: any) => {
+          callbacks?.onUploadComplete?.(piece);
+          onProgress?.({
+            stage: 'uploading',
+            message: 'File uploaded! Adding pieces to dataset...',
+            percentage: 80
+          });
+        },
+
+        // Piece addition callback
+        onPieceAdded: (transactionResponse: any) => {
+          callbacks?.onPieceAdded?.(transactionResponse);
+          onProgress?.({
+            stage: 'uploading',
+            message: transactionResponse 
+              ? `Waiting for confirmation (tx: ${transactionResponse.hash?.slice(0, 8)}...)`
+              : 'Waiting for transaction confirmation...',
+            percentage: 90
+          });
+        },
+
+        // Piece confirmation callback
+        onPieceConfirmed: () => {
+          callbacks?.onPieceConfirmed?.();
+          onProgress?.({
+            stage: 'uploading',
+            message: 'Data pieces added to dataset successfully',
+            percentage: 95
+          });
+        }
+      };
+
+      const { pieceCid } = await storageService.upload(data, uploadCallbacks);
+
+      onProgress?.({
+        stage: 'uploading',
+        message: 'Upload completed successfully!',
+        percentage: 100
+      });
 
       return { pieceCid, datasetCreated };
     } catch (error) {
+      // Enhanced error handling for provider-specific issues
+      let errorMessage = 'Could not upload file to Filecoin';
+      let debugInfo: any = {
+        phase: 'unknown',
+        provider: 'unknown'
+      };
+
+      if (error instanceof Error) {
+        // Check for common provider issues
+        if (error.message.includes('ezpdpz-calib') || error.message.includes('provider')) {
+          errorMessage = 'Upload failed due to storage provider issues. Try again - you may get assigned to a different provider.';
+          debugInfo.provider = 'ezpdpz-calib';
+          debugInfo.phase = 'provider_upload';
+        } else if (error.message.includes('timeout') || error.message.includes('network')) {
+          errorMessage = 'Upload timeout - this might be a temporary provider issue. Please try again.';
+          debugInfo.phase = 'network_timeout';
+        } else if (error.message.includes('dataset')) {
+          errorMessage = 'Dataset creation or resolution failed. Check your payment allowances.';
+          debugInfo.phase = 'dataset_creation';
+        } else if (error.message.includes('signature') || error.message.includes('sign')) {
+          errorMessage = 'Transaction signing failed. Make sure your wallet is connected and unlocked.';
+          debugInfo.phase = 'signature';
+        }
+      }
+
+      console.error('Upload error details:', {
+        originalError: error,
+        debugInfo,
+        stack: error instanceof Error ? error.stack : 'No stack trace'
+      });
+
       throw createStorageError('Upload failed', {
         cause: error,
-        userMessage: 'Could not upload file to Filecoin'
+        userMessage: errorMessage,
+        details: debugInfo
       });
     }
   }

@@ -75,6 +75,19 @@ export interface UploadOptions {
   
   /** Progress callback for upload status updates */
   onProgress?: (status: UploadProgress) => void;
+  
+  /** Storage operation callbacks for detailed tracking */
+  callbacks?: StorageCallbacks;
+  
+  /** Optional service provider selection to avoid unreliable providers */
+  serviceProvider?: {
+    /** Preferred provider ID (e.g., 8, 12, 16 are recommended as reliable) */
+    providerId?: number;
+    /** Preferred provider address */
+    providerAddress?: string;
+    /** Whether to force creation of new dataset with this provider */
+    forceCreateDataSet?: boolean;
+  };
 }
 
 export interface UploadProgress {
@@ -362,13 +375,30 @@ export type BrowserBlob = typeof Blob extends undefined ? never : Blob;
 // ============================================================================
 
 export interface StorageCallbacks {
-  onDataSetResolved?: () => void;
-  onDataSetCreationStarted?: () => void;
-  onDataSetCreationProgress?: (status: { transactionSuccess?: boolean; serverConfirmed?: boolean }) => void;
-  onProviderSelected?: (provider: { name: string }) => void;
+  onDataSetResolved?: (info: { datasetId: number; provider: string; withCDN: boolean }) => void;
+  onDataSetCreationStarted?: (transactionResponse: any, statusUrl?: string) => void;
+  onDataSetCreationProgress?: (status: { 
+    transactionSuccess?: boolean; 
+    serverConfirmed?: boolean; 
+    elapsedMs?: number;
+    message?: string;
+  }) => void;
+  onProviderSelected?: (provider: { 
+    name: string; 
+    id: string; 
+    withCDN: boolean;
+    currentRootCount?: number;
+  }) => void;
   onUploadComplete?: (piece: any) => void;
   onPieceAdded?: (transactionResponse: any) => void;
   onPieceConfirmed?: () => void;
+}
+
+export interface ProofsetInfo {
+  providerId: string;
+  proofset: any;
+  withCDN: boolean;
+  currentRootCount: number;
 }
 
 // ============================================================================

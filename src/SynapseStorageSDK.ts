@@ -143,8 +143,9 @@ export class SynapseStorageSDK {
 
       const { pieceCid, datasetCreated } = await this.storage.upload(
         uploadData,
-        undefined,
-        options?.onProgress
+        options?.callbacks,
+        options?.onProgress,
+        options?.serviceProvider
       );
 
       // Deploy smart contracts for encrypted files

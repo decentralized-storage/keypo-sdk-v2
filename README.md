@@ -64,12 +64,12 @@ const sdk = new SynapseStorageSDK(synapse, {
 const fileData = new TextEncoder().encode("Hello, Filecoin!");
 const result = await sdk.upload(fileData, {
   fileName: 'hello.txt',
-  encrypted: true,
-  isPublic: false, // Private - requires NFT
+  isPublic: false, // Private - requires NFT to decrypt
   onProgress: (progress) => console.log(progress.message)
 });
 
 console.log('File uploaded:', result.pieceCid);
+console.log('Data identifier:', result.dataIdentifier);
 ```
 
 ## Configuration
@@ -108,41 +108,99 @@ interface SDKConfig {
 async upload(data: Uint8Array, options?: UploadOptions): Promise<UploadResult>
 ```
 
-Upload and optionally encrypt a file to Filecoin.
+Upload and encrypt a file to Filecoin with NFT-based access control.
 
 **Parameters:**
 - `data`: File data as Uint8Array
-- `options`: Upload configuration
+- `options`: Upload configuration (all optional)
 
 **UploadOptions:**
 ```typescript
 interface UploadOptions {
   fileName?: string;              // File name for metadata
-  encrypted?: boolean;            // Encrypt file (default: true)
   isPublic?: boolean;            // Public access when encrypted (default: true)
   skipPaymentCheck?: boolean;     // Skip USDFC balance validation
   metadata?: Record<string, any>; // Custom metadata
   onProgress?: (progress: UploadProgress) => void; // Progress callback
+  callbacks?: StorageCallbacks;   // Detailed operation callbacks
+  serviceProvider?: {             // Manual provider selection (optional)
+    providerId?: number;          // Specific provider ID (e.g., 8, 16)
+    providerAddress?: string;     // Provider wallet address
+    forceCreateDataSet?: boolean; // Force new dataset creation
+  };
 }
 ```
 
-**Returns:** `UploadResult` with `pieceCid`, `dataIdentifier`, and metadata
+**Returns:** `UploadResult` with `pieceCid`, `dataIdentifier`, `encrypted`, `accessType`, and metadata
 
-**Example:**
+#### Provider Selection (Optional)
+
+By default, the SDK automatically selects the best available provider using this priority:
+1. **Existing datasets** - Reuses your existing datasets for faster uploads
+2. **Provider health** - Automatically pings providers to find responsive ones  
+3. **Random selection** - Falls back to random selection from approved providers
+
+For better reliability, you can manually specify a provider:
+
+```typescript
+// Manual provider selection (recommended for reliability)
+serviceProvider: {
+  providerId: 16,              // Use specific provider (8=THCloudAI, 16=zens-ocean)
+  forceCreateDataSet: true     // Create new dataset (costs ~1-2 USDFC)
+}
+```
+
+**Available Providers** (Calibration testnet):
+- **8** - THCloudAI (reliable)
+- **16** - zens-ocean (reliable)  
+- **2** - pspsps
+- **3** - ezpdpz-calib (may have issues)
+- **4** - infrafolio-calib
+- **13** - filstarry-pdp
+
+#### Examples
+
+**Simple upload (auto-provider selection):**
 ```typescript
 const fileData = new TextEncoder().encode("My secret data");
 const result = await sdk.upload(fileData, {
   fileName: 'secret.txt',
-  encrypted: true,
-  isPublic: false, // Private - only owner can access
-  metadata: { category: 'personal', tags: ['important'] },
-  onProgress: ({ message, step, total }) => {
-    console.log(`${step}/${total}: ${message}`);
+  isPublic: false // Private - only NFT owner can access
+});
+```
+
+**Upload with manual provider selection:**
+```typescript
+const result = await sdk.upload(fileData, {
+  fileName: 'secret.txt',
+  isPublic: false,
+  serviceProvider: {
+    providerId: 16,           // Use zens-ocean provider
+    forceCreateDataSet: true  // Create new dataset
+  },
+  onProgress: (progress) => {
+    console.log(`${progress.percentage}% - ${progress.message}`);
   }
 });
+```
 
-console.log(`Uploaded: ${result.pieceCid}`);
-console.log(`Data ID: ${result.dataIdentifier}`);
+**Upload with detailed callbacks:**
+```typescript
+const result = await sdk.upload(fileData, {
+  fileName: 'secret.txt',
+  isPublic: false,
+  callbacks: {
+    onProviderSelected: (provider) => {
+      console.log(`Using provider: ${provider.name}`);
+    },
+    onDataSetCreationStarted: (tx, statusUrl) => {
+      console.log(`Creating dataset: ${tx.hash}`);
+    },
+    onUploadComplete: (piece) => {
+      console.log(`Upload complete: ${piece}`);
+    }
+  }
+});
 ```
 
 ### Download Files
@@ -223,6 +281,8 @@ async share(pieceCid: string, options: ShareOptions): Promise<void>
 
 Share a private file with another wallet by minting an access NFT.
 
+**📋 Important**: The recipient wallet must have at least one existing dataset (created by uploading a file) before they can download shared files. If the recipient has never uploaded a file, they should upload at least one file first to establish their dataset.
+
 **ShareOptions:**
 ```typescript
 interface ShareOptions {
@@ -241,6 +301,19 @@ await sdk.share('bafk...', {
 console.log('File shared successfully');
 ```
 
+**Recipient Requirements:**
+```typescript
+// Recipient must first create a dataset by uploading any file
+const recipientSDK = new SynapseStorageSDK(synapse, config, recipientPrivateKey);
+await recipientSDK.upload(new TextEncoder().encode("init"), {
+  fileName: "init.txt",
+  isPublic: true // Can be any file to establish dataset
+});
+
+// Now the recipient can download shared files
+const sharedFile = await recipientSDK.download(sharedPieceCid);
+```
+
 ### Delete Files
 
 ```typescript
@@ -248,6 +321,8 @@ async delete(pieceCid: string, options?: DeleteOptions): Promise<DeleteResult>
 ```
 
 Delete a file from the permissions registry (revokes access, data remains on Filecoin).
+
+**📋 Important**: The delete function currently removes the file from the permissions registry, making it no longer downloadable through the SDK. However, the pieceCID remains stored on the Filecoin network. In a future version of the SDK, we will add the ability to schedule the deletion of the pieceCID from the storage provider.
 
 **Example:**
 ```typescript
@@ -456,12 +531,26 @@ DEBUG=true
 3. **"File not found" error**
    - Verify the piece CID is correct
    - Check if file was uploaded with same wallet address
+   - For shared files: Ensure the recipient wallet has created at least one dataset (uploaded a file)
 
-4. **Transaction hanging**
+4. **Upload timeouts or provider issues**
+   - Some providers may be unreliable (especially provider 3 on calibration)
+   - Use manual provider selection with reliable providers:
+     ```typescript
+     serviceProvider: { providerId: 16 } // or 8
+     ```
+   - Check provider status with the list providers script
+
+5. **Transaction hanging**
    - ZeroDev bundler may be slow, transactions have 30-60s timeouts
    - Check network status and try again
 
-5. **Encryption/Decryption failures**
+6. **Dataset creation failures**
+   - Ensure sufficient USDFC balance (1-2 USDFC needed for new datasets)
+   - Try using existing datasets first: `forceCreateDataSet: false`
+   - Check if provider supports dataset creation
+
+7. **Encryption/Decryption failures**
    - Ensure Lit Protocol network is accessible
    - Check wallet has permission to decrypt (NFT ownership for private files)
 
