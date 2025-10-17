@@ -1,0 +1,29 @@
+{
+  "name": "@keypo/synapse-storage-sdk-examples",
+  "version": "1.0.0",
+  "description": "Examples for using the Synapse Storage SDK",
+  "type": "module",
+  "scripts": {
+    "upload": "node basic-upload.js",
+    "download": "node download-file.js",
+    "private": "node private-upload-and-share.js",
+    "list": "node list-files.js",
+    "delete": "node delete-file.js"
+  },
+  "dependencies": {
+    "@keypo/synapse-storage-sdk": "^0.1.0-beta.5",
+    "@filoz/synapse-sdk": "^0.24.0",
+    "ethers": "^6.0.0",
+    "viem": "^2.0.0",
+    "dotenv": "^16.0.0"
+  },
+  "keywords": [
+    "filecoin",
+    "storage",
+    "encryption",
+    "web3",
+    "examples"
+  ],
+  "author": "Keypo",
+  "license": "MIT"
+}
