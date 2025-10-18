@@ -1,10 +1,12 @@
-# Synapse Storage SDK
+# Keypo Typescript SDK
 
-A TypeScript SDK for encrypted file storage on Filecoin via Synapse, featuring Lit Protocol encryption, NFT-based access control, and ZeroDev account abstraction.
+A serverless SDK for sharing private data on the web. Access control logic (i.e. who can access what files) are stored on-chain. A distributed key management network (Lit Protocol) enforces the ACL when encrypting/decrypting files. All encrypted data is stored on Filecoin and payment for storage is handled on-chain.
+
+A great solution for projects that want self custody, no vendor lock-in and minimal recurring expenses.
 
 ## Features
 
-- 🔐 **End-to-end encryption** with Lit Protocol v8
+- 🔐 **End-to-end encryption** with Lit Protocol
 - 📁 **Filecoin storage** via Synapse network
 - 🎫 **NFT-based access control** with smart contracts
 - 🌍 **Public/private file modes** with granular permissions
