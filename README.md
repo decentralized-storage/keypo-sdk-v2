@@ -26,8 +26,10 @@ npm install @keypo/synapse-storage-sdk
 ## Peer Dependencies
 
 ```bash
-npm install @filoz/synapse-sdk ethers viem @zerodev/sdk @lit-protocol/lit-client
+npm install @filoz/synapse-sdk ethers viem
 ```
+
+> **Note**: Lit Protocol dependencies (`@lit-protocol/auth`, `@lit-protocol/lit-client`, etc.) and ZeroDev dependencies are included automatically.
 
 ## Quick Start
 
@@ -36,9 +38,9 @@ import { Synapse } from '@filoz/synapse-sdk';
 import { SynapseStorageSDK } from '@keypo/synapse-storage-sdk';
 import { ethers } from 'ethers';
 
-// Initialize Synapse
+// Initialize Synapse  
 const wallet = new ethers.Wallet(process.env.PRIVATE_KEY!);
-const provider = new ethers.JsonRpcProvider('https://sepolia.base.org');
+const provider = new ethers.JsonRpcProvider('https://api.calibration.node.glif.io/rpc/v1');
 const signer = wallet.connect(provider);
 
 const synapse = await Synapse.create({
@@ -49,11 +51,11 @@ const synapse = await Synapse.create({
 // Initialize SDK
 const sdk = new SynapseStorageSDK(synapse, {
   network: 'calibration',
-  rpcUrl: 'https://sepolia.base.org',
+  rpcUrl: 'https://api.calibration.node.glif.io/rpc/v1',
   encryption: {
     registryAddress: '0x8370eE1a51B5F31cc10E2f4d786Ff20198B10BBE',
     validationAddress: '0x35ADB6b999AbcD5C9CdF2262c7190C7b96ABcE4C',
-    bundlerRpcUrl: 'https://rpc.zerodev.app/api/v3/YOUR_PROJECT_ID'
+    bundlerRpcUrl: 'https://rpc.zerodev.app/api/v3/YOUR_PROJECT_ID/chain/84532'
   },
   storage: {
     capacityGB: 10,
@@ -481,19 +483,35 @@ const recentFiles = allFiles
 
 ## Network Configuration
 
-### Base Sepolia Testnet (Recommended)
+The SDK operates across multiple networks for different functions:
+
+### 🌐 Multi-Network Architecture
+
+- **📁 Filecoin Storage**: Calibration testnet for decentralized file storage
+- **🔐 Smart Contracts**: Base Sepolia for NFT access control and permissions  
+- **🔑 Encryption**: Lit Protocol Naga Test network for key management
+
+### Filecoin Calibration Testnet (Recommended)
 
 ```typescript
 const config = {
   network: 'calibration',
-  rpcUrl: 'https://sepolia.base.org',
+  rpcUrl: 'https://api.calibration.node.glif.io/rpc/v1',
   encryption: {
-    registryAddress: '0x8370eE1a51B5F31cc10E2f4d786Ff20198B10BBE',
-    validationAddress: '0x35ADB6b999AbcD5C9CdF2262c7190C7b96ABcE4C',
-    bundlerRpcUrl: 'https://rpc.zerodev.app/api/v3/YOUR_PROJECT_ID'
+    registryAddress: '0x8370eE1a51B5F31cc10E2f4d786Ff20198B10BBE',      // Base Sepolia
+    validationAddress: '0x35ADB6b999AbcD5C9CdF2262c7190C7b96ABcE4C',    // Base Sepolia
+    bundlerRpcUrl: 'https://rpc.zerodev.app/api/v3/YOUR_PROJECT_ID/chain/84532' // Base Sepolia
   }
 };
 ```
+
+### 🔑 Lit Protocol Integration
+
+The SDK automatically uses **Naga Test network** for encryption/decryption:
+- **Network**: `nagaTest` (decentralized, stable)
+- **Auth Storage**: Local file system (`./lit-auth-local/`)
+- **Requirements**: Requires payment for operations
+- **Features**: Persistent key storage, production-ready
 
 ### Environment Variables
 
@@ -553,8 +571,10 @@ DEBUG=true
    - Check if provider supports dataset creation
 
 7. **Encryption/Decryption failures**
-   - Ensure Lit Protocol network is accessible
+   - Ensure Lit Protocol Naga Test network is accessible
    - Check wallet has permission to decrypt (NFT ownership for private files)
+   - Verify authentication context is properly initialized
+   - Clear local auth storage if persistent errors: `rm -rf ./lit-auth-local/`
 
 ### Debug Mode
 
