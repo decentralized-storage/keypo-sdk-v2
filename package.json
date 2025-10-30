@@ -1,6 +1,6 @@
 {
   "name": "@keypo/synapse-storage-sdk",
-  "version": "0.1.0-beta.6",
+  "version": "0.1.0-beta.7",
   "description": "TypeScript SDK for encrypted file storage on Filecoin via Synapse",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -69,7 +69,7 @@
   },
   "files": [
     "dist",
-    "src",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ]
 }
